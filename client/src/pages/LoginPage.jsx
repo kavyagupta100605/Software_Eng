@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { LogIn, Lock, Mail, ArrowRight } from 'lucide-react';
 import { authAPI } from '../services/api';
@@ -12,6 +12,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -22,7 +23,9 @@ export default function LoginPage() {
       login(token, user);
       toast.success(`Welcome back, ${user.name}!`);
 
-      if (user.role === 'provider') {
+      if (location.state?.returnTo?.startsWith('/providers/') && ['client', 'admin'].includes(user.role)) {
+        navigate(location.state.returnTo, { replace: true });
+      } else if (user.role === 'provider') {
         navigate('/provider/dashboard');
       } else if (user.role === 'admin') {
         navigate('/admin');

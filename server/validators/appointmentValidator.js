@@ -4,6 +4,7 @@ const { validate } = require('./authValidator');
 const createAppointmentValidation = validate([
   body('providerId').isMongoId().withMessage('Valid providerId is required'),
   body('serviceId').isMongoId().withMessage('Valid serviceId is required'),
+  body('holdId').optional().isMongoId(),
   body('slotStart').isISO8601().withMessage('Valid slotStart ISO date-time is required')
 ]);
 

@@ -1,9 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Clock, Calendar as CalendarIcon, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Clock, Calendar as CalendarIcon, AlertCircle } from 'lucide-react';
 import { formatCurrency } from '../../lib/utils';
 
-export default function SlotPicker({ slots, service, onSelectSlot, loading }) {
+export default function SlotPicker({ slots, service, onSelectSlot, loading, error, joining }) {
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
 
   // Group slots by calendar day
@@ -48,12 +48,16 @@ export default function SlotPicker({ slots, service, onSelectSlot, loading }) {
     );
   }
 
+  if (error && groupedSlots.length === 0) {
+    return <p role="status" className="p-4 text-sm text-rose-700 dark:text-rose-300">Could not load appointment times. Please try refreshing the page.</p>;
+  }
+
   if (groupedSlots.length === 0) {
     return (
       <div className="p-8 rounded-2xl bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-center space-y-2">
         <AlertCircle className="w-8 h-8 mx-auto text-amber-500" />
         <h4 className="font-semibold text-slate-900 dark:text-slate-100">No Open Slots Available</h4>
-        <p className="text-sm text-slate-500 dark:text-slate-400">There are no available slots for {service.name} over the next 7 days.</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400">There are no scheduled times for {service.name} in this date range.</p>
       </div>
     );
   }
@@ -119,19 +123,36 @@ export default function SlotPicker({ slots, service, onSelectSlot, loading }) {
               minute: '2-digit'
             });
 
+            const booked = slot.status === 'booked';
+            const offered = slot.status === 'offered';
+            const waiting = slot.status === 'waiting';
+            const held = slot.status === 'held';
+            const reserved = slot.status === 'reserved';
+            const label = held ? 'Temporarily held' : booked ? 'Booked · Join waitlist'
+              : waiting ? 'On waitlist'
+              : reserved ? 'Waitlist priority'
+              : offered ? 'Your turn to book'
+              : 'Available';
+            const colors = booked || waiting || reserved || held
+              ? 'border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200'
+              : offered
+                ? 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200'
+                : 'border-indigo-100 bg-white text-slate-800 hover:bg-indigo-50 dark:border-indigo-900/50 dark:bg-slate-900 dark:text-slate-200';
+
             return (
               <motion.button
                 key={slot.slotStart}
                 whileHover={{ scale: 1.04, y: -2 }}
                 whileTap={{ scale: 0.96 }}
                 onClick={() => onSelectSlot(slot)}
-                className="flex items-center justify-between px-4 py-3 rounded-xl border border-indigo-100 dark:border-indigo-900/50 bg-white dark:bg-slate-900 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 hover:border-indigo-500 text-slate-800 dark:text-slate-200 font-medium text-sm transition-all shadow-sm group"
+                disabled={waiting || reserved || held || joining}
+                className={`flex flex-col items-start gap-1 rounded-xl border px-3 py-3 text-left text-sm font-medium shadow-sm disabled:cursor-default ${colors}`}
               >
-                <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-indigo-500 group-hover:scale-110 transition-transform" />
-                  <span>{timeFormatted}</span>
-                </div>
-                <CheckCircle2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <span className="flex items-center gap-2 font-semibold">
+                  <Clock aria-hidden="true" className="h-4 w-4" />
+                  {timeFormatted}
+                </span>
+                <span className="text-xs">{label}</span>
               </motion.button>
             );
           })}

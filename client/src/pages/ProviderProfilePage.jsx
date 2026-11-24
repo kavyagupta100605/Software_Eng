@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Star, MapPin, Clock, ShieldAlert, CheckCircle2, ChevronLeft, Calendar as CalendarIcon, Info } from 'lucide-react';
-import { providerAPI, availabilityAPI, appointmentAPI } from '../services/api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { providerAPI, availabilityAPI, appointmentAPI, walletQuery } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { CategoryBadge } from '../components/ui/Badge';
 import SlotPicker from '../components/booking/SlotPicker';
@@ -14,27 +15,42 @@ export default function ProviderProfilePage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const requestedServiceId = searchParams.get('service');
+  const rescheduleId = searchParams.get('reschedule');
+  const [hold, setHold] = useState(null);
+  const requestedStart = searchParams.get('slot');
+  const queryClient = useQueryClient();
 
   const [provider, setProvider] = useState(null);
   const [selectedService, setSelectedService] = useState(null);
-  const [slots, setSlots] = useState([]);
   const [loadingProvider, setLoadingProvider] = useState(true);
-  const [loadingSlots, setLoadingSlots] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [bookingSuccess, setBookingSuccess] = useState(false);
   const [notes, setNotes] = useState('');
+  const [joining, setJoining] = useState(false);
+  const requestedDate = new Date(requestedStart);
+  const linkedDate = requestedServiceId === selectedService?._id && requestedStart
+    && Number.isFinite(+requestedDate) && +requestedDate > Date.now()
+    ? requestedStart
+    : undefined;
+  const slotsQuery = useQuery({
+    queryKey: ['slots', id, selectedService?._id, user?.id, linkedDate],
+    queryFn: async () => {
+      const { data } = await availabilityAPI.getSlots(id, selectedService._id, linkedDate, linkedDate);
+      return data.data.slots;
+    },
+    enabled: Boolean(selectedService),
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
+  });
 
   useEffect(() => {
     fetchProvider();
   }, [id]);
-
-  useEffect(() => {
-    if (selectedService) {
-      fetchSlots(selectedService._id);
-    }
-  }, [selectedService]);
 
   const fetchProvider = async () => {
     setLoadingProvider(true);
@@ -43,7 +59,7 @@ export default function ProviderProfilePage() {
       const data = res.data.data.provider;
       setProvider(data);
       if (data.services && data.services.length > 0) {
-        setSelectedService(data.services[0]);
+        setSelectedService(data.services.find(service => service._id === requestedServiceId) || data.services[0]);
       }
     } catch (err) {
       toast.error('Failed to load provider profile');
@@ -53,48 +69,91 @@ export default function ProviderProfilePage() {
     }
   };
 
-  const fetchSlots = async (serviceId) => {
-    setLoadingSlots(true);
+  const handleSlotSelect = async (slot) => {
+    if (!user) {
+      toast.error('Sign in to book or join the waitlist');
+      navigate('/login', { state: { returnTo: location.pathname + location.search } });
+      return;
+    }
+    if (!['client', 'admin'].includes(user.role)) {
+      toast.error('A client account is required to book or join the waitlist');
+      return;
+    }
+    if (slot.status === 'booked') {
+      if (joining) return;
+      setJoining(true);
+      try {
+        await availabilityAPI.joinWaitlist(id, {
+          serviceId: selectedService._id, slotStart: slot.slotStart
+        });
+        toast.success('You joined the waitlist. We’ll email you if it’s your turn to book.');
+      } catch (error) {
+        toast.error(error.response?.data?.error?.message || 'Could not join the waitlist');
+      } finally {
+        await slotsQuery.refetch();
+        setJoining(false);
+      }
+      return;
+    }
+    if (!slot.available) return;
+    if (joining) return;
+    setJoining(true);
     try {
-      const res = await availabilityAPI.getSlots(id, serviceId);
-      setSlots(res.data.data.slots);
-    } catch (err) {
-      toast.error('Failed to fetch available time slots');
+      const result = await availabilityAPI.hold(id, { serviceId: selectedService._id, slotStart: slot.slotStart });
+      setHold(result.data.data);
+      setSelectedSlot(slot);
+      setBookingModalOpen(true);
+      setBookingSuccess(false);
+    } catch (error) {
+      toast.error(error.response?.data?.error?.message || 'Could not reserve this time');
+      void slotsQuery.refetch();
     } finally {
-      setLoadingSlots(false);
+      setJoining(false);
     }
   };
 
-  const handleSlotSelect = (slot) => {
-    if (!user) {
-      toast.error('Please log in to book an appointment');
-      navigate('/login');
-      return;
+  const closeBooking = () => {
+    if (isSubmitting) return;
+    if (hold && !bookingSuccess) {
+      void availabilityAPI.releaseHold(id, hold.id).then(() => slotsQuery.refetch()).catch(() => {});
     }
-    setSelectedSlot(slot);
-    setBookingModalOpen(true);
-    setBookingSuccess(false);
+    setHold(null);
+    setBookingModalOpen(false);
   };
 
   const handleConfirmBooking = async () => {
-    if (!selectedSlot || !selectedService) return;
+    if (!selectedSlot || !selectedService || isSubmitting) return;
+    const priceCents = Math.round((selectedService.price ?? 0) * 100);
     setIsSubmitting(true);
     try {
-      await appointmentAPI.create({
-        providerId: provider._id,
-        serviceId: selectedService._id,
-        slotStart: selectedSlot.slotStart,
-        notes
-      });
+      if (rescheduleId) {
+        await appointmentAPI.reschedule(rescheduleId, selectedSlot.slotStart, hold?.id);
+      } else {
+        await appointmentAPI.create({
+          providerId: provider._id,
+          serviceId: selectedService._id,
+          slotStart: selectedSlot.slotStart,
+          notes,
+          expectedPriceCents: priceCents,
+          holdId: hold?.id,
+          ...(priceCents > 0 && { paymentMethod: 'demo_wallet' })
+        });
+      }
 
       setBookingSuccess(true);
-      toast.success('Appointment booked successfully!');
+      if (!rescheduleId && priceCents > 0) void queryClient.invalidateQueries({ queryKey: walletQuery(user).queryKey });
+      toast.success(rescheduleId ? 'Appointment rescheduled' : 'Appointment booked successfully!');
 
       // Refresh slots
-      fetchSlots(selectedService._id);
+      void slotsQuery.refetch();
     } catch (err) {
       const msg = err.response?.data?.error?.message || 'Failed to book appointment';
       toast.error(msg);
+      if (err.response?.data?.error?.code === 'HOLD_EXPIRED') {
+        setHold(null);
+        setBookingModalOpen(false);
+      }
+      void slotsQuery.refetch();
     } finally {
       setIsSubmitting(false);
     }
@@ -163,7 +222,7 @@ export default function ProviderProfilePage() {
             </div>
             <div className="flex items-center gap-1.5">
               <ShieldAlert className="w-4 h-4 text-indigo-500" />
-              <span>Cancel Window: {provider.cancellationWindowHours}h before</span>
+              <span>Unpaid bookings: cancel {provider.cancellationWindowHours}h before</span>
             </div>
           </div>
         </div>
@@ -188,6 +247,7 @@ export default function ProviderProfilePage() {
                   key={srv._id}
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
+                  disabled={Boolean(rescheduleId && srv._id !== requestedServiceId)}
                   onClick={() => setSelectedService(srv)}
                   className={`cursor-pointer p-5 rounded-2xl border transition-all ${
                     isSelected
@@ -217,19 +277,27 @@ export default function ProviderProfilePage() {
 
       {/* Animated Slot Picker */}
       <div className="p-8 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl">
+        {!user && linkedDate && (
+          <Link to="/login" state={{ returnTo: location.pathname + location.search }}
+            className="mb-4 inline-block text-sm font-semibold text-indigo-700 dark:text-indigo-300">
+            Sign in to view your waitlist offer
+          </Link>
+        )}
         <SlotPicker
-          slots={slots}
+          slots={slotsQuery.data ?? []}
           service={selectedService}
           onSelectSlot={handleSlotSelect}
-          loading={loadingSlots}
+          loading={Boolean(selectedService) && slotsQuery.isPending}
+          error={slotsQuery.isError}
+          joining={joining}
         />
       </div>
 
       {/* Booking Confirmation Modal */}
       <Modal
         isOpen={bookingModalOpen}
-        onClose={() => setBookingModalOpen(false)}
-        title={bookingSuccess ? 'Booking Confirmed!' : 'Confirm Appointment'}
+        onClose={closeBooking}
+        title={bookingSuccess ? (rescheduleId ? 'Appointment Rescheduled' : 'Booking Confirmed') : (rescheduleId ? 'Confirm New Time' : 'Confirm Appointment')}
       >
         {bookingSuccess ? (
           <div className="text-center py-6 space-y-4">
@@ -243,7 +311,7 @@ export default function ProviderProfilePage() {
             </motion.div>
             <h4 className="text-xl font-bold text-slate-900 dark:text-slate-100">You're All Set!</h4>
             <p className="text-sm text-slate-600 dark:text-slate-300">
-              A confirmation notification has been dispatched. You can track your appointment from your dashboard.
+              Your appointment is confirmed. You can view it in your dashboard.
             </p>
             <div className="pt-4 flex gap-3">
               <button
@@ -259,7 +327,7 @@ export default function ProviderProfilePage() {
             <div className="p-4 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900 space-y-2">
               <div className="flex justify-between items-center text-sm font-bold text-indigo-900 dark:text-indigo-200">
                 <span>{selectedService?.name}</span>
-                <span>{formatCurrency(selectedService?.price)}</span>
+                <span>{rescheduleId ? "No new charge" : formatCurrency(selectedService?.price)}</span>
               </div>
               <div className="text-xs text-indigo-700 dark:text-indigo-300 space-y-1">
                 <p><strong>Provider:</strong> {provider.businessName}</p>
@@ -268,6 +336,16 @@ export default function ProviderProfilePage() {
               </div>
             </div>
 
+            {hold && (
+              <p className="text-sm font-medium text-indigo-700 dark:text-indigo-300">
+                Held until {formatTime(hold.expiresAt)}. {rescheduleId && 'Your original appointment stays booked until this change succeeds.'}
+              </p>
+            )}
+            {selectedSlot?.offerExpiresAt && (
+              <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+                Reserved for you until {formatTime(selectedSlot.offerExpiresAt)}.
+              </p>
+            )}
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 Additional Notes (Optional)
@@ -283,13 +361,20 @@ export default function ProviderProfilePage() {
 
             <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 p-3 rounded-xl">
               <Info className="w-4 h-4 flex-shrink-0" />
-              <span>Free cancellation up to {provider.cancellationWindowHours} hours before start time.</span>
+              <span>{selectedService?.price > 0
+                ? 'Cancel before the start for a demo wallet refund. Refund tiers are 100% from 3 hours, 75% from 2 hours, 50% from 1 hour, and 25% under 1 hour.'
+                : `Cancel up to ${provider.cancellationWindowHours} hours before the start time.`}</span>
             </div>
 
+            {!rescheduleId && selectedService?.price > 0 && (
+              <Link to="/wallet" className="text-sm font-semibold text-indigo-600 dark:text-indigo-300">
+                View wallet or add demo funds
+              </Link>
+            )}
             <div className="flex items-center gap-3 pt-2">
               <button
                 type="button"
-                onClick={() => setBookingModalOpen(false)}
+                onClick={closeBooking}
                 className="w-1/2 py-3 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-700 dark:text-slate-300 text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-800"
               >
                 Cancel
@@ -303,7 +388,7 @@ export default function ProviderProfilePage() {
                 {isSubmitting ? (
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 ) : (
-                  'Confirm Booking'
+                  rescheduleId ? 'Confirm New Time' : selectedService?.price > 0 ? 'Pay with Demo Wallet' : 'Confirm Booking'
                 )}
               </button>
             </div>

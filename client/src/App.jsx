@@ -10,6 +10,7 @@ import { ThemeProvider } from './context/ThemeContext';
 import Navbar from './components/ui/Navbar';
 import Footer from './components/ui/Footer';
 
+import WalletPage from './pages/WalletPage';
 import HomePage from './pages/HomePage';
 import ProviderProfilePage from './pages/ProviderProfilePage';
 import LoginPage from './pages/LoginPage';
@@ -94,6 +95,12 @@ function AnimatedRoutes() {
               </ProtectedRoute>
             }
           />
+
+          <Route path="/wallet" element={
+            <ProtectedRoute allowedRoles={['client', 'admin']}>
+              <WalletPage />
+            </ProtectedRoute>
+          } />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

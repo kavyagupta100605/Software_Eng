@@ -14,6 +14,7 @@ const blockedRangeSchema = new mongoose.Schema({
 
 const availabilitySchema = new mongoose.Schema({
   providerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Provider', required: true, unique: true },
+  timezone: String,
   weeklyHours: [weeklyHourSchema],
   blockedRanges: [blockedRangeSchema]
 });

@@ -60,8 +60,12 @@ export const serviceAPI = {
 // Availability API
 export const availabilityAPI = {
   get: (providerId) => API.get(`/providers/${providerId}/availability`),
-  update: (providerId, weeklyHours) => API.put(`/providers/${providerId}/availability`, { weeklyHours }),
+  update: (providerId, weeklyHours, timezone) => API.put(`/providers/${providerId}/availability`, { weeklyHours, timezone }),
+  removeBlock: (providerId, blockId) => API.delete(`/providers/${providerId}/availability/block/${blockId}`),
   blockDate: (providerId, data) => API.post(`/providers/${providerId}/availability/block`, data),
+  hold: (providerId, data) => API.post(`/providers/${providerId}/holds`, data),
+  releaseHold: (providerId, holdId) => API.delete(`/providers/${providerId}/holds/${holdId}`),
+  joinWaitlist: (providerId, data) => API.post(`/providers/${providerId}/waitlist`, data),
   getSlots: (providerId, serviceId, from, to) => API.get(`/providers/${providerId}/slots`, {
     params: { serviceId, from, to }
   }),
@@ -72,6 +76,7 @@ export const appointmentAPI = {
   create: (data) => API.post('/appointments', data),
   getClientAppointments: (params) => API.get('/appointments/me', { params }),
   getProviderAppointments: (providerId, params) => API.get(`/providers/${providerId}/appointments`, { params }),
+  reschedule: (id, slotStart, holdId) => API.patch(`/appointments/${id}/reschedule`, { slotStart, holdId }),
   cancel: (id) => API.patch(`/appointments/${id}/cancel`),
   updateStatus: (id, status) => API.patch(`/appointments/${id}/status`, { status }),
 };
@@ -84,3 +89,15 @@ export const adminAPI = {
 };
 
 export default API;
+
+export const walletAPI = {
+  get: () => API.get('/wallet'),
+  topUp: (amountCents) => API.post('/wallet/top-up', { amountCents }),
+};
+
+export const walletQuery = (user) => ({
+  queryKey: ['wallet', user?.id],
+  refetchOnWindowFocus: true,
+  queryFn: async () => (await walletAPI.get()).data.data.balanceCents,
+  enabled: Boolean(user?.id && ['client', 'admin'].includes(user.role)),
+});

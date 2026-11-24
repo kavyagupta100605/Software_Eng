@@ -27,6 +27,10 @@ export default function ProviderDashboardPage() {
   // Availability Modal state
   const [availModalOpen, setAvailModalOpen] = useState(false);
   const [weeklyHoursState, setWeeklyHoursState] = useState([]);
+  const [timezone, setTimezone] = useState('');
+  const [scheduleError, setScheduleError] = useState(null);
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const [block, setBlock] = useState({ localStart: '', localEnd: '', reason: '' });
 
   useEffect(() => {
     if (providerId) {
@@ -50,6 +54,7 @@ export default function ProviderDashboardPage() {
       setAvailability(availRes.data?.data?.availability || null);
       if (availRes.data?.data?.availability?.weeklyHours) {
         setWeeklyHoursState(availRes.data.data.availability.weeklyHours);
+        setTimezone(availRes.data.data.availability.timezone);
       }
     } catch (err) {
       console.error('Error loading provider dashboard:', err);
@@ -100,24 +105,29 @@ export default function ProviderDashboardPage() {
     }
   };
 
-  const handleSaveAvailability = async () => {
+  const saveSchedule = async (request, message, onSaved) => {
+    setSavingSchedule(true);
+    setScheduleError(null);
     try {
-      await availabilityAPI.update(providerId, weeklyHoursState);
-      toast.success('Weekly availability updated!');
-      setAvailModalOpen(false);
-      fetchDashboardData();
-    } catch (err) {
-      toast.error('Failed to save availability');
+      const { data } = await request();
+      setAvailability(data.data.availability);
+      toast.success(message);
+      onSaved?.();
+    } catch (error) {
+      setScheduleError(error.response?.data?.error || { message: 'Could not save this schedule change.' });
+    } finally {
+      setSavingSchedule(false);
     }
   };
 
-  const toggleDayOfWeek = (dayNum) => {
-    const existing = weeklyHoursState.find(wh => wh.dayOfWeek === dayNum);
-    if (existing) {
-      setWeeklyHoursState(weeklyHoursState.filter(wh => wh.dayOfWeek !== dayNum));
-    } else {
-      setWeeklyHoursState([...weeklyHoursState, { dayOfWeek: dayNum, startTime: '09:00', endTime: '17:00' }]);
-    }
+  const handleSaveAvailability = () => saveSchedule(
+    () => availabilityAPI.update(providerId, weeklyHoursState, timezone),
+    'Working hours updated',
+    () => setAvailModalOpen(false)
+  );
+
+  const setShiftTime = (index, key, value) => {
+    setWeeklyHoursState(hours => hours.map((shift, position) => position === index ? { ...shift, [key]: value } : shift));
   };
 
   // Stats calculation
@@ -147,11 +157,16 @@ export default function ProviderDashboardPage() {
 
         <div className="flex items-center gap-3">
           <button
-            onClick={() => setAvailModalOpen(true)}
+            onClick={() => {
+              setWeeklyHoursState(availability?.weeklyHours ?? []);
+              setTimezone(availability?.timezone ?? '');
+              setScheduleError(null);
+              setAvailModalOpen(true);
+            }}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-xs font-semibold hover:border-indigo-500 transition-colors shadow-sm"
           >
             <Clock className="w-4 h-4 text-indigo-500" />
-            <span>Edit Weekly Hours</span>
+            <span>Manage Schedule</span>
           </button>
 
           <button
@@ -366,29 +381,82 @@ export default function ProviderDashboardPage() {
       </Modal>
 
       {/* Weekly Hours Modal */}
-      <Modal isOpen={availModalOpen} onClose={() => setAvailModalOpen(false)} title="Configure Weekly Hours">
+      <Modal isOpen={availModalOpen} onClose={() => setAvailModalOpen(false)} title="Manage Schedule">
         <div className="space-y-4">
-          <p className="text-xs text-slate-500">Toggle days you are open for appointments (09:00 to 17:00 default):</p>
-          
-          <div className="space-y-2">
-            {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((dayName, idx) => {
-              const active = weeklyHoursState.some(wh => wh.dayOfWeek === idx);
-              return (
-                <div key={dayName} className="flex items-center justify-between p-3 rounded-xl border border-slate-100 dark:border-slate-800">
-                  <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">{dayName}</span>
-                  <button
-                    type="button"
-                    onClick={() => toggleDayOfWeek(idx)}
-                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-colors ${
-                      active ? 'bg-indigo-600 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    {active ? 'Open' : 'Closed'}
-                  </button>
+          <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-2">
+            <label className="block text-sm font-semibold">
+              Provider timezone
+              <input className="mt-1 w-full rounded-lg border bg-transparent px-3 py-2" value={timezone}
+                placeholder="Asia/Kolkata" onChange={event => setTimezone(event.target.value)} />
+            </label>
+            <div className="space-y-2">
+              {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day, dayOfWeek) => (
+                <div key={day} className="space-y-2 rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold">{day}</span>
+                    <button type="button" className="text-xs font-semibold text-indigo-600 dark:text-indigo-300"
+                      onClick={() => setWeeklyHoursState(hours => [...hours, { dayOfWeek, startTime: '09:00', endTime: '17:00' }])}>
+                      Add shift
+                    </button>
+                  </div>
+                  {weeklyHoursState.map((shift, index) => shift.dayOfWeek === dayOfWeek && (
+                    <div key={index} className="flex items-center gap-2 text-sm">
+                      <input aria-label={`${day} shift start`} type="time" value={shift.startTime} className="min-w-0 bg-transparent"
+                        onChange={event => setShiftTime(index, 'startTime', event.target.value)} />
+                      <span>to</span>
+                      <input aria-label={`${day} shift end`} type="time" value={shift.endTime} className="min-w-0 bg-transparent"
+                        onChange={event => setShiftTime(index, 'endTime', event.target.value)} />
+                      <button type="button" className="ml-auto text-xs text-rose-600"
+                        onClick={() => setWeeklyHoursState(hours => hours.filter((_, position) => position !== index))}>
+                        Remove
+                      </button>
+                    </div>
+                  ))}
                 </div>
-              );
-            })}
+              ))}
+            </div>
+            <section className="space-y-3 border-t pt-4">
+              <h3 className="font-semibold">Holidays and blocked time</h3>
+              <p className="text-xs text-slate-500">Blocks use the saved timezone ({availability?.timezone}).</p>
+              <ul className="space-y-2">
+                {availability?.blockedRanges?.map(range => (
+                  <li key={range._id} className="flex justify-between gap-2 text-sm">
+                    <span>{range.reason} · {new Date(range.start).toLocaleString(undefined, { timeZone: availability.timezone })} to {new Date(range.end).toLocaleString(undefined, { timeZone: availability.timezone })}</span>
+                    <button type="button" disabled={savingSchedule} className="text-rose-600"
+                      onClick={() => saveSchedule(() => availabilityAPI.removeBlock(providerId, range._id), 'Block removed')}>
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <form className="space-y-2" onSubmit={event => {
+                event.preventDefault();
+                void saveSchedule(() => availabilityAPI.blockDate(providerId, block), 'Time blocked',
+                  () => setBlock({ localStart: '', localEnd: '', reason: '' }));
+              }}>
+                {['localStart', 'localEnd'].map((field, index) => (
+                  <label key={field} className="block text-sm">
+                    {index ? 'Ends' : 'Starts'}
+                    <input type="datetime-local" required value={block[field]} className="mt-1 block w-full rounded-lg border bg-transparent px-2 py-1"
+                      onChange={event => setBlock({ ...block, [field]: event.target.value })} />
+                  </label>
+                ))}
+                <input aria-label="Reason" placeholder="Reason (optional)" maxLength={200} value={block.reason}
+                  className="w-full rounded-lg border bg-transparent px-2 py-1" onChange={event => setBlock({ ...block, reason: event.target.value })} />
+                <button type="submit" disabled={savingSchedule} className="text-sm font-semibold text-indigo-600 dark:text-indigo-300">Add block</button>
+              </form>
+            </section>
           </div>
+          {scheduleError && (
+            <div role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-900 dark:bg-rose-950 dark:text-rose-200">
+              <p>{scheduleError.message}</p>
+              {scheduleError.appointments?.length > 0 && (
+                <ul className="mt-2 list-disc pl-5">
+                  {scheduleError.appointments.map(item => <li key={item._id}>{formatDate(item.slotStart)} at {formatTime(item.slotStart)}</li>)}
+                </ul>
+              )}
+            </div>
+          )}
 
           <div className="flex justify-end gap-3 pt-4">
             <button
@@ -399,6 +467,7 @@ export default function ProviderDashboardPage() {
             </button>
             <button
               onClick={handleSaveAvailability}
+              disabled={savingSchedule}
               className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-semibold shadow-md"
             >
               Save Changes
