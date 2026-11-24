@@ -62,7 +62,7 @@ const getProviderById = async (req, res, next) => {
   try {
     const provider = await Provider.findById(req.params.id).populate('userId', 'name email phone').lean();
 
-    if (!provider) {
+    if (!provider || !provider.isApproved) {
       return res.status(404).json({
         error: {
           code: 'NOT_FOUND',

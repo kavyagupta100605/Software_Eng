@@ -14,17 +14,17 @@ const Appointment = require('../models/Appointment');
  */
 async function getAvailableSlots(providerId, serviceId, startDate, endDate) {
   const provider = await Provider.findById(providerId);
-  if (!provider) {
-    throw new Error('Provider not found');
+  if (!provider || !provider.isApproved) {
+    throw Object.assign(new Error('Approved provider not found'), { statusCode: 404 });
   }
 
   const service = await Service.findById(serviceId);
-  if (!service || !service.isActive) {
-    throw new Error('Service not found or inactive');
+  if (!service || !service.isActive || service.providerId.toString() !== providerId.toString()) {
+    throw Object.assign(new Error('Active service for this provider not found'), { statusCode: 404 });
   }
 
   const durationMins = service.durationMins;
-  const bufferMins = provider.bufferMinutes || 10;
+  const bufferMins = provider.bufferMinutes ?? 10;
   const stepMins = durationMins + bufferMins;
 
   // Fetch availability document
@@ -43,13 +43,16 @@ async function getAvailableSlots(providerId, serviceId, startDate, endDate) {
 
   const start = new Date(startDate);
   const end = new Date(endDate);
+  start.setHours(0, 0, 0, 0);
+  end.setHours(23, 59, 59, 999);
+  const bufferMs = bufferMins * 60000;
 
   // Fetch all requested/confirmed appointments for this provider in range
   const existingAppointments = await Appointment.find({
     providerId,
     status: { $in: ['requested', 'confirmed'] },
-    slotStart: { $lt: end },
-    slotEnd: { $gt: start }
+    slotStart: { $lt: new Date(end.getTime() + bufferMs) },
+    slotEnd: { $gt: new Date(start.getTime() - bufferMs) }
   }).lean();
 
   const availableSlots = [];
@@ -102,7 +105,7 @@ async function getAvailableSlots(providerId, serviceId, startDate, endDate) {
         const hasAppointmentConflict = existingAppointments.some(appt => {
           const aStart = new Date(appt.slotStart).getTime();
           const aEnd = new Date(appt.slotEnd).getTime();
-          return slotStart.getTime() < aEnd && slotEnd.getTime() > aStart;
+          return slotStart.getTime() < aEnd + bufferMs && slotEnd.getTime() + bufferMs > aStart;
         });
 
         if (!hasAppointmentConflict) {
@@ -133,12 +136,15 @@ async function checkSlotConflict(providerId, slotStart, slotEnd) {
   const sStart = new Date(slotStart);
   const sEnd = new Date(slotEnd);
 
-  // Check existing appointments
+  const provider = await Provider.findById(providerId);
+  const bufferMs = (provider?.bufferMinutes ?? 10) * 60000;
+
+  // Include turnaround time on either side of an existing appointment.
   const conflictingAppointment = await Appointment.findOne({
     providerId,
     status: { $in: ['requested', 'confirmed'] },
-    slotStart: { $lt: sEnd },
-    slotEnd: { $gt: sStart }
+    slotStart: { $lt: new Date(sEnd.getTime() + bufferMs) },
+    slotEnd: { $gt: new Date(sStart.getTime() - bufferMs) }
   });
 
   if (conflictingAppointment) {

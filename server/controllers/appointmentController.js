@@ -2,7 +2,7 @@ const Appointment = require('../models/Appointment');
 const Service = require('../models/Service');
 const Provider = require('../models/Provider');
 const User = require('../models/User');
-const { checkSlotConflict } = require('../services/availabilityEngine');
+const { checkSlotConflict, getAvailableSlots } = require('../services/availabilityEngine');
 const { sendBookingConfirmation } = require('../services/notifyService');
 
 const createAppointment = async (req, res, next) => {
@@ -11,14 +11,14 @@ const createAppointment = async (req, res, next) => {
     const clientId = req.user.id;
 
     const service = await Service.findById(serviceId);
-    if (!service || !service.isActive) {
+    if (!service || !service.isActive || service.providerId.toString() !== providerId.toString()) {
       return res.status(404).json({
         error: { code: 'NOT_FOUND', message: 'Selected service is not active or does not exist' }
       });
     }
 
     const provider = await Provider.findById(providerId);
-    if (!provider) {
+    if (!provider || !provider.isApproved) {
       return res.status(404).json({
         error: { code: 'NOT_FOUND', message: 'Selected provider does not exist' }
       });
@@ -27,7 +27,16 @@ const createAppointment = async (req, res, next) => {
     const start = new Date(slotStart);
     const end = new Date(start.getTime() + service.durationMins * 60000);
 
-    // Concurrency conflict validation at write time
+    if (!Number.isFinite(start.getTime()) || start.getTime() <= Date.now()) {
+      return res.status(400).json({ error: { code: 'INVALID_SLOT', message: 'Appointment start must be a valid future time' } });
+    }
+    // Reuse discovery rules: opening hours, closing boundaries, slot grid and buffers.
+    const availableSlots = await getAvailableSlots(providerId, serviceId, start, start);
+    if (!availableSlots.some(slot => new Date(slot.slotStart).getTime() === start.getTime())) {
+      return res.status(400).json({ error: { code: 'INVALID_SLOT', message: 'Selected time is outside the available booking slots' } });
+    }
+
+    // Final conflict recheck (atomic reservation handling is separate follow-up work)
     const conflict = await checkSlotConflict(providerId, start, end);
     if (conflict.hasConflict) {
       return res.status(409).json({

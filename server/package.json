@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "jest --runInBand --detectOpenHandles"
+    "test": "jest --runInBand --detectOpenHandles",
+    "test:quick": "node --test tests/quickFixes.check.cjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

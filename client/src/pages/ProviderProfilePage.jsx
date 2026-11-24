@@ -140,7 +140,7 @@ export default function ProviderProfilePage() {
               <CategoryBadge category={provider.category} />
               <div className="flex items-center gap-1 text-amber-500 text-xs font-bold bg-amber-50 dark:bg-amber-950/40 px-2.5 py-1 rounded-lg border border-amber-200/50">
                 <Star className="w-3.5 h-3.5 fill-current" />
-                <span>{provider.avgRating ? provider.avgRating.toFixed(1) : '5.0'}</span>
+                <span>{provider.avgRating ? provider.avgRating.toFixed(1) : 'No ratings yet'}</span>
               </div>
             </div>
 

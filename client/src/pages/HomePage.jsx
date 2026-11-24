@@ -170,7 +170,7 @@ export default function HomePage() {
                       <CategoryBadge category={p.category} />
                       <div className="flex items-center gap-1 text-amber-500 text-xs font-bold bg-amber-50 dark:bg-amber-950/40 px-2 py-1 rounded-lg border border-amber-200/50 dark:border-amber-900/50">
                         <Star className="w-3.5 h-3.5 fill-current" />
-                        <span>{p.avgRating ? p.avgRating.toFixed(1) : '5.0'}</span>
+                        <span>{p.avgRating ? p.avgRating.toFixed(1) : 'No ratings yet'}</span>
                       </div>
                     </div>
 

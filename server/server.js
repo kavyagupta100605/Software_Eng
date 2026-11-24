@@ -55,7 +55,9 @@ const PORT = process.env.PORT || 5000;
 
 connectDB().then(async () => {
   // Seed demo data if database is empty
-  await seedDemoData();
+  if (process.env.NODE_ENV !== 'production') {
+    await seedDemoData();
+  }
 
   // Start cron jobs
   initReminderCron();
@@ -63,4 +65,7 @@ connectDB().then(async () => {
   app.listen(PORT, () => {
     console.log(`🚀 Express API server running on port ${PORT} [http://localhost:${PORT}]`);
   });
+}).catch(() => {
+  console.error('Server startup failed: check database configuration and connectivity.');
+  process.exitCode = 1;
 });

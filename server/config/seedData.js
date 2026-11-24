@@ -5,6 +5,7 @@ const Service = require('../models/Service');
 const Availability = require('../models/Availability');
 
 async function seedDemoData() {
+  if (process.env.NODE_ENV === 'production') return;
   try {
     const userCount = await User.countDocuments();
     if (userCount > 0) {

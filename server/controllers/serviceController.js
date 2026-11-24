@@ -3,6 +3,10 @@ const Provider = require('../models/Provider');
 
 const getProviderServices = async (req, res, next) => {
   try {
+    const provider = await Provider.findById(req.params.id);
+    if (!provider || (!provider.isApproved && provider.userId.toString() !== req.user?.id && req.user?.role !== 'admin')) {
+      return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Approved provider not found' } });
+    }
     const services = await Service.find({ providerId: req.params.id, isActive: true }).lean();
     res.json({ data: { services } });
   } catch (err) {

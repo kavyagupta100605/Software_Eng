@@ -1,6 +1,9 @@
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-appointment-booking-key-2026';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET || !JWT_SECRET.trim()) {
+  throw new Error('JWT_SECRET is required');
+}
 
 const authMiddleware = (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -30,7 +33,13 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
+const optionalAuthMiddleware = (req, res, next) => {
+  if (!req.headers.authorization) return next();
+  return authMiddleware(req, res, next);
+};
+
 module.exports = {
+  optionalAuthMiddleware,
   authMiddleware,
   JWT_SECRET
 };

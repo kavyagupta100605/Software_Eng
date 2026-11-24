@@ -35,6 +35,7 @@ describe('Availability Engine Unit Tests', () => {
       userId: user._id,
       businessName: 'Test Business',
       category: 'Clinic',
+      isApproved: true,
       bufferMinutes: 15
     });
 
@@ -68,7 +69,7 @@ describe('Availability Engine Unit Tests', () => {
 
   test('Filters out slots that overlap blocked ranges', async () => {
     const user = await User.create({ name: 'Test Provider 2', email: 'p2@test.com', passwordHash: 'hash', role: 'provider' });
-    const provider = await Provider.create({ userId: user._id, businessName: 'Biz 2', category: 'Salon', bufferMinutes: 0 });
+    const provider = await Provider.create({ userId: user._id, businessName: 'Biz 2', isApproved: true, category: 'Salon', bufferMinutes: 0 });
     const service = await Service.create({ providerId: provider._id, name: 'Cut', durationMins: 60 });
 
     const nextMonday = new Date();
@@ -97,7 +98,7 @@ describe('Availability Engine Unit Tests', () => {
   test('Detects write-time conflicts accurately', async () => {
     const user = await User.create({ name: 'Provider 3', email: 'p3@test.com', passwordHash: 'hash', role: 'provider' });
     const client = await User.create({ name: 'Client 1', email: 'c1@test.com', passwordHash: 'hash', role: 'client' });
-    const provider = await Provider.create({ userId: user._id, businessName: 'Biz 3', category: 'Tutor' });
+    const provider = await Provider.create({ userId: user._id, businessName: 'Biz 3', isApproved: true, category: 'Tutor' });
     const service = await Service.create({ providerId: provider._id, name: 'Lesson', durationMins: 60 });
 
     const slotStart = new Date(Date.now() + 86400000); // Tomorrow
