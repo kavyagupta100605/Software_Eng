@@ -1,59 +1,24 @@
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const morgan = require('morgan');
-const rateLimit = require('express-rate-limit');
 const dotenv = require('dotenv');
 
 dotenv.config();
 
 const connectDB = require('./config/db');
-const errorHandler = require('./middleware/errorHandler');
+const cron = require('node-cron');
+const { deliverDueEmails } = require('./jobs/emailOutbox');
+const { deliverEmail } = require('./services/notifyService');
+const { scanWaitlists } = require('./services/waitlist');
 const initReminderCron = require('./jobs/reminderCron');
 const seedDemoData = require('./config/seedData');
+const SlotHold = require('./models/SlotHold');
+const WaitlistEntry = require('./models/WaitlistEntry');
+const EmailNotification = require('./models/EmailNotification');
 
-// Route Imports
-const authRoutes = require('./routes/v1/authRoutes');
-const providerRoutes = require('./routes/v1/providerRoutes');
-const serviceRoutes = require('./routes/v1/serviceRoutes');
-const appointmentRoutes = require('./routes/v1/appointmentRoutes');
-const adminRoutes = require('./routes/v1/adminRoutes');
-
-const app = express();
-
-// Hardening & Security Middleware
-app.use(helmet());
-app.use(cors({ origin: true, credentials: true }));
-app.use(morgan('dev'));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Rate limiter for auth endpoints
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 mins
-  max: 100, // Limit each IP to 100 requests per windowMs
-  message: { error: { code: 'TOO_MANY_REQUESTS', message: 'Too many requests, please try again later.' } }
-});
-app.use('/api/v1/auth', authLimiter);
-
-// Versioned API Routes
-app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/providers', providerRoutes);
-app.use('/api/v1/services', serviceRoutes);
-app.use('/api/v1/appointments', appointmentRoutes);
-app.use('/api/v1/admin', adminRoutes);
-
-// Root health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-// Global Error Handler
-app.use(errorHandler);
+const app = require('./app');
 
 const PORT = process.env.PORT || 5000;
 
 connectDB().then(async () => {
+  await Promise.all([SlotHold, WaitlistEntry, EmailNotification].map(model => model.init()));
   // Seed demo data if database is empty
   if (process.env.NODE_ENV !== 'production') {
     await seedDemoData();
@@ -61,6 +26,21 @@ connectDB().then(async () => {
 
   // Start cron jobs
   initReminderCron();
+  let delivering = false;
+  cron.schedule('*/10 * * * * *', async () => {
+    if (delivering) return;
+    delivering = true;
+    try {
+      await deliverDueEmails(deliverEmail);
+    } catch (error) {
+      console.error('Email queue failed:', error.message);
+    } finally {
+      delivering = false;
+    }
+  });
+  cron.schedule('* * * * *', () => {
+    void scanWaitlists().catch(error => console.error('Waitlist scan failed:', error.message));
+  });
 
   app.listen(PORT, () => {
     console.log(`🚀 Express API server running on port ${PORT} [http://localhost:${PORT}]`);

@@ -6,6 +6,16 @@ const appointmentSchema = new mongoose.Schema({
   serviceId: { type: mongoose.Schema.Types.ObjectId, ref: 'Service', required: true },
   slotStart: { type: Date, required: true },
   slotEnd: { type: Date, required: true },
+  walletPaidCents: { type: Number, default: 0 },
+  walletRefund: {
+    type: new mongoose.Schema({
+      amountCents: { type: Number, required: true, min: 0 },
+      percent: { type: Number, required: true, min: 0, max: 100 },
+      status: { type: String, required: true, enum: ['credited', 'not_due'] }
+    }, { _id: false }),
+    default: undefined
+  },
+  cancelledAt: Date,
   status: {
     type: String,
     enum: ['requested', 'confirmed', 'completed', 'cancelled', 'no-show'],

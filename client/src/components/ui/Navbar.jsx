@@ -2,11 +2,15 @@ import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { Calendar, Sun, Moon, LogOut, User, ShieldCheck, LayoutDashboard, Search } from 'lucide-react';
+import { Calendar, Sun, Moon, LogOut, LayoutDashboard, Search, Wallet } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { walletQuery } from '../../services/api';
+import { formatCurrency } from '../../lib/utils';
 import { motion } from 'framer-motion';
 
 export default function Navbar() {
   const { user, logout } = useAuth();
+  const wallet = useQuery(walletQuery(user));
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
 
@@ -33,10 +37,11 @@ export default function Navbar() {
         <nav className="flex items-center gap-2 sm:gap-4">
           <Link
             to="/"
+            aria-label="Discover providers"
             className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors"
           >
             <Search className="w-4 h-4" />
-            <span>Discover Providers</span>
+            <span className="hidden sm:inline">Discover Providers</span>
           </Link>
 
           {user && (
@@ -48,10 +53,11 @@ export default function Navbar() {
                   ? '/admin'
                   : '/dashboard'
               }
+              aria-label="Dashboard"
               className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors"
             >
               <LayoutDashboard className="w-4 h-4" />
-              <span>Dashboard</span>
+              <span className="hidden sm:inline">Dashboard</span>
             </Link>
           )}
 
@@ -68,7 +74,13 @@ export default function Navbar() {
 
           {/* User Auth Section */}
           {user ? (
-            <div className="flex items-center gap-3 pl-2 border-l border-slate-200 dark:border-slate-800">
+            <div className="flex items-center gap-1 sm:gap-3 pl-2 border-l border-slate-200 dark:border-slate-800">
+              {user.id && ['client', 'admin'].includes(user.role) && (
+                <Link to="/wallet" aria-label="Demo wallet" className="flex items-center gap-1 whitespace-nowrap rounded-lg px-2 py-2 text-sm font-semibold text-indigo-700 dark:text-indigo-300">
+                  <Wallet aria-hidden="true" className="hidden h-4 w-4 sm:block" />
+                  {wallet.data === undefined ? 'Wallet' : formatCurrency(wallet.data / 100)}
+                </Link>
+              )}
               <div className="hidden md:flex flex-col text-right">
                 <span className="text-xs font-semibold text-slate-900 dark:text-slate-100">{user.name}</span>
                 <span className="text-[10px] capitalize font-medium text-indigo-600 dark:text-indigo-400">{user.role}</span>

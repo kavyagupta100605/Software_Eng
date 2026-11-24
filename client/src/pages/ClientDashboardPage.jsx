@@ -1,7 +1,10 @@
+import { Link } from 'react-router-dom';
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Calendar, Clock, MapPin, AlertTriangle, XCircle, CheckCircle } from 'lucide-react';
-import { appointmentAPI } from '../services/api';
+import { useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '../context/AuthContext';
+import { appointmentAPI, walletQuery } from '../services/api';
 import { StatusBadge } from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import toast from 'react-hot-toast';
@@ -14,6 +17,8 @@ const TABS = [
 ];
 
 export default function ClientDashboardPage() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('upcoming');
@@ -58,8 +63,14 @@ export default function ClientDashboardPage() {
     setCancelling(true);
 
     try {
-      await appointmentAPI.cancel(selectedApptToCancel._id);
-      toast.success('Appointment cancelled successfully');
+      const { data: { data: { appointment } } } = await appointmentAPI.cancel(selectedApptToCancel._id);
+      if (appointment.walletRefund?.status === 'credited') {
+        void queryClient.invalidateQueries({ queryKey: walletQuery(user).queryKey });
+        toast.success(`Appointment cancelled. ${formatCurrency(appointment.walletRefund.amountCents / 100)} returned to your demo wallet.`);
+      } else {
+        toast.success('Appointment cancelled successfully');
+      }
+      setActiveTab('cancelled');
       setSelectedApptToCancel(null);
       fetchAppointments();
     } catch (err) {
@@ -140,7 +151,7 @@ export default function ClientDashboardPage() {
                     </p>
                   </div>
                   <span className="text-sm font-extrabold text-slate-900 dark:text-slate-100">
-                    {formatCurrency(appt.serviceId?.price)}
+                    {formatCurrency(appt.walletPaidCents > 0 ? appt.walletPaidCents / 100 : appt.serviceId?.price)}
                   </span>
                 </div>
 
@@ -161,6 +172,14 @@ export default function ClientDashboardPage() {
                   )}
                 </div>
 
+                {appt.walletRefund && (
+                  <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                    {appt.walletRefund.status === 'credited'
+                      ? `${formatCurrency(appt.walletRefund.amountCents / 100)} refunded to your demo wallet (${appt.walletRefund.percent}%)`
+                      : 'No demo wallet refund due'}
+                  </p>
+                )}
+
                 {appt.notes && (
                   <p className="text-xs italic text-slate-500 dark:text-slate-400">
                     Note: "{appt.notes}"
@@ -169,7 +188,13 @@ export default function ClientDashboardPage() {
 
                 {/* Cancel Action Button */}
                 {appt.status === 'confirmed' && (
-                  <div className="pt-2 flex justify-end">
+                  <div className="pt-2 flex justify-end gap-3">
+                    {appt.providerId?._id && appt.serviceId?._id && new Date(appt.slotStart) > new Date() && (
+                      <Link to={`/providers/${appt.providerId._id}?service=${appt.serviceId._id}&reschedule=${appt._id}`}
+                        className="px-4 py-2 rounded-xl text-xs font-semibold border border-indigo-200 text-indigo-700 dark:text-indigo-300">
+                        Reschedule
+                      </Link>
+                    )}
                     <button
                       onClick={() => handleCancelClick(appt)}
                       className="px-4 py-2 rounded-xl text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 border border-rose-200/60 dark:border-rose-900/60 transition-colors"
@@ -195,6 +220,7 @@ export default function ClientDashboardPage() {
             <AlertTriangle className="w-6 h-6 flex-shrink-0" />
             <p className="text-xs font-medium">
               Are you sure you want to cancel this appointment? This action cannot be undone.
+              {selectedApptToCancel?.walletPaidCents > 0 && ' Demo refund is based on the time remaining when you confirm: 100% at 3 hours, 75% at 2 hours, 50% at 1 hour, and 25% with less than 1 hour left before the start.'}
             </p>
           </div>
 
